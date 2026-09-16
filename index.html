@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>THE NOORVI — Cloud Business Manager</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--ink:#161616;--muted:#73777f;--line:#e5e7eb;--dark:#151515;--good:#138a4b;--bad:#c73535}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:Arial,Inter,sans-serif;color:var(--ink)}
+header{height:64px;background:#151515;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 24px}.brand{font-weight:800;letter-spacing:2px}.brand small{display:block;font-size:9px;opacity:.6;letter-spacing:1px;margin-top:3px}
+.wrap{display:flex;min-height:calc(100vh - 64px)}aside{width:220px;background:#fff;border-right:1px solid var(--line);padding:16px 12px}nav button{display:block;width:100%;border:0;background:transparent;text-align:left;padding:12px;border-radius:8px;margin:3px 0;cursor:pointer}nav button.active,nav button:hover{background:#eee;font-weight:700}
+main{flex:1;padding:26px;max-width:1500px;margin:auto;width:100%}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.card,.section{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px}.section{margin-top:18px}.label{font-size:11px;color:var(--muted);text-transform:uppercase}.metric{font-size:26px;font-weight:800;margin-top:7px}.sub,.small{font-size:13px;color:var(--muted)}h1{margin:0 0 5px;font-size:26px}h2{font-size:18px}
+.formgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}input,select,textarea{padding:10px;border:1px solid #dfe2e6;border-radius:8px;font:inherit}.full{grid-column:1/-1}.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.right{margin-left:auto}
+button{padding:10px 13px;border:0;border-radius:8px;font-weight:700;cursor:pointer}.primary{background:#151515;color:#fff}.secondary{background:#eee}.danger{background:#fee2e2;color:#991b1b}.success{background:#dcfce7;color:#166534}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:10px;border-bottom:1px solid var(--line);text-align:left}th{font-size:11px;color:#777;text-transform:uppercase;background:#fafafa}.badge{padding:4px 8px;border-radius:20px;font-size:11px;font-weight:700;background:#eee}.Delivered{background:#dcfce7;color:#166534}.Pending{background:#fef3c7;color:#92400e}.Cancelled,.Returned{background:#fee2e2;color:#991b1b}.profit{color:var(--good);font-weight:700}.loss{color:var(--bad);font-weight:700}.empty{text-align:center;padding:30px;color:#888}.login{max-width:430px;margin:80px auto}.toast{position:fixed;right:20px;bottom:20px;background:#151515;color:white;padding:12px 16px;border-radius:9px;display:none}
+@media(max-width:900px){aside{width:170px}.grid{grid-template-columns:repeat(2,1fr)}.formgrid{grid-template-columns:repeat(2,1fr)}}@media(max-width:620px){aside{display:none}main{padding:14px}.formgrid{grid-template-columns:1fr}}
+</style></head>
+<body>
+<header><div class="brand">THE NOORVI<small>CLOUD • ORDER & ACCOUNTS</small></div><div id="userBox" class="small" style="color:#bbb"></div></header>
+<div id="root"></div><div id="toast" class="toast"></div>
+<script>
+const SUPABASE_URL="https://odksmpcrwifxrdofcbwj.supabase.co";
+const SUPABASE_ANON_KEY="sb_publishable_s3x5FhLqP1cnZdTjQuhvpA_Dm51AwTI";
+let sb=null, user=null, page="dashboard", cache={products:[],orders:[],expenses:[]};
+
+const root=document.getElementById("root");
+function configured(){return !SUPABASE_URL.startsWith("YOUR_")&&!SUPABASE_ANON_KEY.startsWith("YOUR_")}
+function money(n){return "₹"+Number(n||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}
+function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+function toast(s){let t=document.getElementById("toast");t.textContent=s;t.style.display="block";setTimeout(()=>t.style.display="none",2200)}
+function uid(){return crypto.randomUUID?crypto.randomUUID():Date.now()+"-"+Math.random()}
+
+async function boot(){
+ if(!configured()){showSetup();return}
+ sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+ const {data}=await sb.auth.getSession(); user=data.session?.user||null;
+ if(!user){showLogin();return}
+ document.getElementById("userBox").textContent=user.email;
+ await load(); await autoArchive(); render();
+}
+function showSetup(){root.innerHTML=`<div class="login section"><h1>THE NOORVI Cloud Manager</h1><p class="sub">Cloud version is ready. First connect your Supabase project.</p><p class="small">Open <b>index.html</b> in the project after replacing <b>YOUR_SUPABASE_URL</b> and <b>YOUR_SUPABASE_ANON_KEY</b> near the top of the file. Full setup is in README.</p></div>`}
+function showLogin(){root.innerHTML=`<div class="login section"><h1>THE NOORVI</h1><p class="sub">Secure cloud login</p><input id="email" type="email" placeholder="Email" style="width:100%;margin:6px 0"><input id="pass" type="password" placeholder="Password" style="width:100%;margin:6px 0"><div class="row" style="margin-top:8px"><button class="primary" onclick="login()">Login</button><button class="secondary" onclick="signup()">Create account</button></div><p class="small">Use the email/password created in Supabase Authentication.</p></div>`}
+async function login(){let {error}=await sb.auth.signInWithPassword({email:email.value,password:pass.value});if(error)alert(error.message);else location.reload()}
+async function signup(){let {error}=await sb.auth.signUp({email:email.value,password:pass.value});if(error)alert(error.message);else alert("Account created. Check your email if confirmation is enabled, then login.")}
+async function logout(){await sb.auth.signOut();location.reload()}
+async function load(){
+ let [p,o,e]=await Promise.all([sb.from("products").select("*").order("created_at"),sb.from("orders").select("*").order("date",{ascending:false}),sb.from("expenses").select("*").order("date",{ascending:false})]);
+ if(p.error||o.error||e.error){alert((p.error||o.error||e.error).message);return}
+ cache={products:p.data||[],orders:o.data||[],expenses:e.data||[]}
+}
+async function autoArchive(){
+ // Archive anything older than six calendar months; archive tables retain history.
+ await sb.rpc("archive_old_data");
+ await load();
+}
+function nav(){return `<aside><nav>
+${["dashboard","orders","products","expenses","reports","settings"].map(x=>`<button class="${page===x?"active":""}" onclick="page='${x}';render()">${({dashboard:"▦ Dashboard",orders:"▤ Orders",products:"▥ Products & Stock",expenses:"₹ Expenses",reports:"◫ Reports",settings:"⚙ Backup & Settings"})[x]}</button>`).join("")}
+<button onclick="logout()">↪ Logout</button></nav></aside>`}
+function render(){let fn={dashboard:rDash,orders:rOrders,products:rProducts,expenses:rExpenses,reports:rReports,settings:rSettings}[page];root.innerHTML=`<div class="wrap">${nav()}<main>${fn()}</main></div>`}
+function rDash(){let sales=cache.orders.filter(o=>o.status!=="Cancelled").reduce((a,o)=>a+Number(o.total),0),profit=cache.orders.filter(o=>o.status!=="Cancelled").reduce((a,o)=>a+Number(o.profit),0)-cache.expenses.reduce((a,e)=>a+Number(e.amount),0),stock=cache.products.reduce((a,p)=>a+Number(p.stock),0);return `<h1>Dashboard</h1><div class="sub">Your cloud-synced THE NOORVI business.</div><div class="grid"><div class="card"><div class="label">Total Sales</div><div class="metric">${money(sales)}</div></div><div class="card"><div class="label">Net Profit</div><div class="metric ${profit<0?"loss":"profit"}">${money(profit)}</div></div><div class="card"><div class="label">Orders</div><div class="metric">${cache.orders.length}</div></div><div class="card"><div class="label">Stock Units</div><div class="metric">${stock}</div></div></div><div class="section"><h2>Recent Orders</h2>${orderTable(cache.orders.slice(0,10))}</div>`}
+function orderTable(a){if(!a.length)return `<div class="empty">No orders yet.</div>`;return `<div style="overflow:auto"><table><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Product</th><th>Qty</th><th>Total</th><th>Profit</th><th>Status</th><th></th></tr></thead><tbody>${a.map(o=>`<tr><td>${esc(o.invoice)}</td><td>${o.date}</td><td>${esc(o.customer||"-")}<div class="small">${esc(o.meesho_id||"")}</div></td><td>${esc(o.product)}</td><td>${o.qty}</td><td>${money(o.total)}</td><td class="${o.profit<0?"loss":"profit"}">${money(o.profit)}</td><td><span class="badge ${o.status}">${o.status}</span></td><td>${actionButtons(o)}</td></tr>`).join("")}</tbody></table></div>`}
+function rOrders(){return `<h1>Orders</h1><div class="sub">Cloud-saved orders with stock and profit.</div><div class="section"><h2>New Order</h2><div class="formgrid"><input id="odate" type="date" value="${new Date().toISOString().slice(0,10)}"><input id="customer" placeholder="Customer name"><input id="mobile" placeholder="Mobile"><input id="meesho" placeholder="Meesho Order ID"><input id="product" class="full" placeholder="Product name"><input id="sku" placeholder="SKU"><input id="size" placeholder="Size"><input id="qty" type="number" min="1" value="1"><input id="sell" type="number" step=".01" placeholder="Selling/unit"><input id="cost" type="number" step=".01" placeholder="Cost/unit"><input id="charges" type="number" step=".01" value="0" placeholder="Charges"><select id="status"><option>Delivered</option><option>Pending</option><option>Cancelled</option><option>Returned</option></select><input id="payment" placeholder="Payment"><textarea id="address" class="full" rows="2" placeholder="Customer address"></textarea></div><button class="primary" style="margin-top:12px" onclick="addOrder()">Save Order</button></div><div class="section"><h2>All Orders</h2><p class="small">Edit, PDF or Delete any order. Deleted orders are removed from current records; stock is restored automatically when applicable.</p>${orderTable(cache.orders)}</div>`}
+
+function actionButtons(o){
+  return `<button class="secondary" onclick="editOrder('${o.id}')">Edit</button>
+          <button class="secondary" onclick="invoice('${o.id}')">PDF</button>
+          <button class="danger" onclick="deleteOrder('${o.id}')">Delete</button>`;
+}
+
+async function editOrder(id){
+  const o=cache.orders.find(x=>x.id===id); if(!o)return;
+  const customer=prompt("Customer name:",o.customer||""); if(customer===null)return;
+  const mobile=prompt("Mobile:",o.mobile||""); if(mobile===null)return;
+  const meesho=prompt("Meesho Order ID:",o.meesho_id||""); if(meesho===null)return;
+  const product=prompt("Product:",o.product||""); if(product===null||!product.trim())return;
+  const sku=prompt("SKU:",o.sku||""); if(sku===null)return;
+  const size=prompt("Size:",o.size||""); if(size===null)return;
+  const qtyRaw=prompt("Quantity:",String(o.qty)); if(qtyRaw===null)return;
+  const qty=Number(qtyRaw); if(!Number.isInteger(qty)||qty<1){alert("Quantity must be a whole number greater than 0.");return}
+  const sellRaw=prompt("Selling price per unit:",String(o.sell)); if(sellRaw===null)return;
+  const costRaw=prompt("Cost per unit:",String(o.cost)); if(costRaw===null)return;
+  const chargesRaw=prompt("Charges:",String(o.charges||0)); if(chargesRaw===null)return;
+  const status=prompt("Status (Delivered / Pending / Cancelled / Returned):",o.status||"Pending"); if(status===null)return;
+  const payment=prompt("Payment:",o.payment||""); if(payment===null)return;
+  const address=prompt("Customer address:",o.address||""); if(address===null)return;
+
+  const sellN=Number(sellRaw), costN=Number(costRaw), chargesN=Number(chargesRaw);
+  if([sellN,costN,chargesN].some(Number.isNaN)){alert("Invalid amount.");return}
+
+  const oldConsumes=!["Cancelled","Returned"].includes(o.status);
+  const newConsumes=!["Cancelled","Returned"].includes(status);
+  const oldQty=Number(o.qty||0), oldProductId=o.product_id||null;
+
+  // Restore old stock first if the old order had consumed stock.
+  if(oldConsumes && oldProductId){
+    const oldP=cache.products.find(p=>p.id===oldProductId);
+    if(oldP) await sb.from("products").update({stock:Number(oldP.stock)+oldQty}).eq("id",oldP.id);
+  }
+
+  let p=cache.products.find(x=>
+    x.id===oldProductId ||
+    (x.name||"").toLowerCase()===product.trim().toLowerCase() &&
+    (x.sku||"").toLowerCase()===(sku||"").trim().toLowerCase() &&
+    (x.size||"").toLowerCase()===(size||"").trim().toLowerCase()
+  );
+
+  if(newConsumes && p && Number(p.stock)<qty){
+    if(!confirm("Stock is lower than this order. Continue anyway?")){
+      await load(); render(); return;
+    }
+  }
+
+  const patch={
+    customer:customer.trim(), mobile:mobile.trim(), meesho_id:meesho.trim(),
+    product:product.trim(), product_id:p?.id||null, sku:sku.trim(), size:size.trim(),
+    qty, sell:sellN, cost:costN, charges:chargesN, total:qty*sellN,
+    profit:qty*(sellN-costN)-chargesN, status:status.trim()||"Pending",
+    payment:payment.trim(), address:address.trim()
+  };
+
+  const r=await sb.from("orders").update(patch).eq("id",id).eq("user_id",user.id);
+  if(r.error){alert(r.error.message);await load();render();return}
+
+  if(newConsumes && p){
+    await sb.from("products").update({stock:Number(p.stock)-qty}).eq("id",p.id);
+  }
+
+  await load(); toast("Order updated"); render();
+}
+
+async function deleteOrder(id){
+  const o=cache.orders.find(x=>x.id===id); if(!o)return;
+  if(!confirm("Delete this order permanently?\n\nIf it consumed stock, the stock will be restored."))return;
+
+  const r=await sb.from("orders").delete().eq("id",id).eq("user_id",user.id);
+  if(r.error){alert(r.error.message);return}
+
+  if(!["Cancelled","Returned"].includes(o.status) && o.product_id){
+    const p=cache.products.find(x=>x.id===o.product_id);
+    if(p) await sb.from("products").update({stock:Number(p.stock)+Number(o.qty||0)}).eq("id",p.id);
+  }
+
+  await load(); toast("Order deleted"); render();
+}
+
+async function addOrder(){let q=Number(qty.value),s=Number(sell.value),c=Number(cost.value),ch=Number(charges.value||0),name=product.value.trim();if(!name||q<1){alert("Product and quantity required.");return}let p=cache.products.find(x=>x.name.toLowerCase()===name.toLowerCase());if(p&&!["Cancelled","Returned"].includes(status.value)&&Number(p.stock)<q&&!confirm("Stock is lower than this order. Continue?"))return;let count=cache.orders.length+1;let o={user_id:user.id,invoice:"TN-"+new Date().getFullYear()+"-"+String(count).padStart(4,"0"),date:odate.value,customer:customer.value.trim(),mobile:mobile.value.trim(),meesho_id:meesho.value.trim(),product:name,product_id:p?.id||null,sku:sku.value.trim(),size:size.value.trim(),qty:q,sell:s,cost:c,charges:ch,total:q*s,profit:q*(s-c)-ch,status:status.value,payment:payment.value.trim(),address:address.value.trim()};let r=await sb.from("orders").insert(o);if(r.error){alert(r.error.message);return}if(p&&!["Cancelled","Returned"].includes(o.status)){await sb.from("products").update({stock:Number(p.stock)-q}).eq("id",p.id)}await load();toast("Order saved");invoice(o.id);render()}
+function rProducts(){return `<h1>Products & Stock</h1><div class="sub">Size/SKU-wise inventory.</div><div class="section"><h2>Add Product</h2><div class="formgrid"><input id="pn" placeholder="Product name"><input id="psku" placeholder="SKU"><input id="psize" placeholder="Size"><input id="pcost" type="number" step=".01" placeholder="Cost"><input id="psell" type="number" step=".01" placeholder="Selling price"><input id="pstock" type="number" placeholder="Opening stock"></div><button class="primary" style="margin-top:12px" onclick="addProduct()">Add Product</button></div><div class="section"><h2>Inventory</h2>${cache.products.length?`<table><thead><tr><th>Product</th><th>SKU</th><th>Size</th><th>Cost</th><th>Sell</th><th>Stock</th></tr></thead><tbody>${cache.products.map(p=>`<tr><td>${esc(p.name)}</td><td>${esc(p.sku)}</td><td>${esc(p.size)}</td><td>${money(p.cost)}</td><td>${money(p.sell)}</td><td><b>${p.stock}</b></td></tr>`).join("")}</tbody></table>`:`<div class="empty">No products.</div>`}</div>`}
+async function addProduct(){if(!pn.value.trim()){alert("Product name required.");return}let r=await sb.from("products").insert({user_id:user.id,name:pn.value.trim(),sku:psku.value.trim(),size:psize.value.trim(),cost:Number(pcost.value||0),sell:Number(psell.value||0),stock:Number(pstock.value||0)});if(r.error)alert(r.error.message);else{await load();toast("Product added");render()}}
+function rExpenses(){return `<h1>Expenses</h1><div class="sub">Cloud-saved business expenses.</div><div class="section"><h2>Add Expense</h2><div class="formgrid"><input id="edate" type="date" value="${new Date().toISOString().slice(0,10)}"><input id="ecat" placeholder="Category"><input id="edesc" placeholder="Description"><input id="eamt" type="number" step=".01" placeholder="Amount"></div><button class="primary" style="margin-top:12px" onclick="addExpense()">Save Expense</button></div><div class="section"><h2>Expense List</h2>${cache.expenses.length?`<table><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th></tr></thead><tbody>${cache.expenses.map(e=>`<tr><td>${e.date}</td><td>${esc(e.category)}</td><td>${esc(e.description)}</td><td>${money(e.amount)}</td></tr>`).join("")}</tbody></table>`:`<div class="empty">No expenses.</div>`}</div>`}
+async function addExpense(){let a=Number(eamt.value);if(a<=0){alert("Enter amount.");return}let r=await sb.from("expenses").insert({user_id:user.id,date:edate.value,category:ecat.value.trim(),description:edesc.value.trim(),amount:a});if(r.error)alert(r.error.message);else{await load();toast("Expense saved");render()}}
+function rReports(){let d=cache.orders.filter(o=>o.status==="Delivered"),sales=d.reduce((a,o)=>a+Number(o.total),0),gross=d.reduce((a,o)=>a+Number(o.profit),0),ex=cache.expenses.reduce((a,e)=>a+Number(e.amount),0);return `<h1>Reports</h1><div class="grid"><div class="card"><div class="label">Delivered Sales</div><div class="metric">${money(sales)}</div></div><div class="card"><div class="label">Gross Profit</div><div class="metric profit">${money(gross)}</div></div><div class="card"><div class="label">Expenses</div><div class="metric">${money(ex)}</div></div><div class="card"><div class="label">Net Profit</div><div class="metric ${gross-ex<0?"loss":"profit"}">${money(gross-ex)}</div></div></div><div class="section"><h2>6-Month Archive</h2><p class="small">Data older than six months is automatically moved to archive tables when you open the app. It is not permanently deleted.</p></div>`}
+function rSettings(){return `<h1>Backup & Settings</h1><div class="section"><h2>Cloud account</h2><p class="small">Signed in as ${esc(user.email)}</p><button class="danger" onclick="logout()">Logout</button></div><div class="section"><h2>Data</h2><p class="small">All current records live in Supabase cloud. The database policies isolate each user's data.</p><button class="secondary" onclick="downloadCurrent()">Download current JSON backup</button></div>`}
+function downloadCurrent(){let b=new Blob([JSON.stringify(cache,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="THE_NOORVI_Current_Backup.json";a.click()}
+async function invoice(id){let o=cache.orders.find(x=>x.id===id);if(!o)return;let {jsPDF}=window.jspdf||{};if(!jsPDF){let s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";s.onload=()=>invoice(id);document.head.appendChild(s);return}let d=new jsPDF({unit:"mm",format:"a4"}),W=210,m=15;d.setFillColor(20,20,20);d.rect(0,0,W,34,"F");d.setTextColor(255,255,255);d.setFont("helvetica","bold");d.setFontSize(20);d.text("THE NOORVI",m,15);d.setFontSize(8);d.setFont("helvetica","normal");d.text("FASHION • ORDER & ACCOUNTS",m,21);d.setFontSize(10);d.text("INVOICE",W-m,13,{align:"right"});d.setFontSize(9);d.text(o.invoice,W-m,20,{align:"right"});d.text(o.date,W-m,26,{align:"right"});d.setTextColor(25,25,25);d.setFont("helvetica","bold");d.text("BILL TO",m,48);d.setFont("helvetica","normal");d.setFontSize(9);let y=54;d.text(o.customer||"Customer",m,y);if(o.mobile){y+=5;d.text("Mobile: "+o.mobile,m,y)}if(o.address){y+=5;d.text(d.splitTextToSize(o.address,80),m,y)}d.setFont("helvetica","bold");d.text("ORDER DETAILS",125,48);d.setFont("helvetica","normal");d.text("Meesho Order ID: "+(o.meesho_id||"-"),125,54);d.text("Payment: "+(o.payment||"-"),125,59);d.text("Status: "+o.status,125,64);let t=78;d.setFillColor(242,242,242);d.rect(m,t,W-2*m,10,"F");d.setFont("helvetica","bold");d.setFontSize(8);d.text("ITEM",m+3,t+6);d.text("SKU",92,t+6);d.text("SIZE",120,t+6);d.text("QTY",140,t+6,{align:"right"});d.text("RATE",163,t+6,{align:"right"});d.text("AMOUNT",192,t+6,{align:"right"});d.setFont("helvetica","normal");d.setFontSize(9);let yy=t+18;d.text(o.product,m+3,yy);d.text(o.sku||"-",92,yy);d.text(o.size||"-",120,yy);d.text(String(o.qty),140,yy,{align:"right"});d.text("INR "+Number(o.sell).toFixed(2),163,yy,{align:"right"});d.text("INR "+Number(o.total).toFixed(2),192,yy,{align:"right"});let sy=yy+22;d.text("Subtotal",150,sy,{align:"right"});d.text("INR "+Number(o.total).toFixed(2),192,sy,{align:"right"});sy+=7;d.text("Charges",150,sy,{align:"right"});d.text("INR "+Number(o.charges||0).toFixed(2),192,sy,{align:"right"});sy+=9;d.setFillColor(20,20,20);d.rect(132,sy-6,63,12,"F");d.setTextColor(255,255,255);d.setFont("helvetica","bold");d.text("TOTAL",150,sy+2,{align:"right"});d.text("INR "+(Number(o.total)+Number(o.charges||0)).toFixed(2),192,sy+2,{align:"right"});d.setTextColor(40,40,40);d.text("Thank you for shopping with THE NOORVI.",m,245);d.setFont("helvetica","normal");d.setFontSize(8);d.text("This is a computer-generated invoice.",m,251);d.save(o.invoice+"_THE_NOORVI.pdf")}
+boot();
+</script></body></html>
